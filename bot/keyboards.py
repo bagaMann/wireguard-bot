@@ -1,45 +1,18 @@
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
 )
 
 
 def user_reply_menu():
-    """Постоянное меню обычного пользователя."""
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="📱 Мои QR-коды"),
-                KeyboardButton(text="➕ Получить новый QR"),
-            ],
-            [KeyboardButton(text="ℹ️ Помощь")],
-        ],
-        resize_keyboard=True,
-        is_persistent=True,
-        one_time_keyboard=False,
-    )
+    """Удаляет старую пользовательскую ReplyKeyboard."""
+    return ReplyKeyboardRemove()
 
 
 def admin_reply_menu():
-    """Постоянное меню администратора: пользовательские и админские действия."""
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="📱 Мои QR-коды"),
-                KeyboardButton(text="➕ Получить новый QR"),
-            ],
-            [KeyboardButton(text="ℹ️ Помощь")],
-            [
-                KeyboardButton(text="👥 Пользователи"),
-                KeyboardButton(text="🔔 Запросы"),
-            ],
-        ],
-        resize_keyboard=True,
-        is_persistent=True,
-        one_time_keyboard=False,
-    )
+    """Удаляет старую административную ReplyKeyboard."""
+    return ReplyKeyboardRemove()
 
 
 def user_main():
