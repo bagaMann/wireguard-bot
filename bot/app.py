@@ -6,6 +6,7 @@ from bot.config import load_settings
 from bot.database import Database
 from bot.handlers import register_handlers
 from bot.logging import setup_logging
+from bot.menu import register_menu_handlers
 from bot.routeros import RouterOSClient
 from bot.wireguard import WireGuardService
 
@@ -27,6 +28,7 @@ class App:
 
         router = Router()
         register_handlers(router, self)
+        register_menu_handlers(router, self)
         self.dispatcher.include_router(router)
 
     async def run(self):
@@ -34,6 +36,7 @@ class App:
         await self.routeros.test()
         await self.bot.delete_webhook(drop_pending_updates=True)
         await self.dispatcher.start_polling(self.bot)
+
 
 def create_app():
     return App()
