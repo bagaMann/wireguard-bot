@@ -18,6 +18,7 @@ def user_reply_menu():
         ],
         resize_keyboard=True,
         is_persistent=True,
+        one_time_keyboard=False,
     )
 
 
@@ -37,6 +38,7 @@ def admin_reply_menu():
         ],
         resize_keyboard=True,
         is_persistent=True,
+        one_time_keyboard=False,
     )
 
 
@@ -70,7 +72,23 @@ def user_configs(configs):
         )]
         for row in configs
     ]
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="user:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def user_configs_compact(configs):
+    """Действия с конфигурациями без отдельной навигации."""
+    rows = []
+    for row in configs:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"📷 {row['name']} ({row['vpn_address']})",
+                callback_data=f"menu:qr:{row['id']}",
+            ),
+            InlineKeyboardButton(
+                text="📄 .conf",
+                callback_data=f"menu:conf:{row['id']}",
+            ),
+        ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -78,7 +96,6 @@ def config_actions(config_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📷 Показать QR", callback_data=f"user:qr:{config_id}")],
         [InlineKeyboardButton(text="📄 Получить конфигурацию", callback_data=f"user:conf:{config_id}")],
-        [InlineKeyboardButton(text="⬅️ Мои QR-коды", callback_data="user:configs")],
     ])
 
 
@@ -98,7 +115,6 @@ def admin_users(users):
         )]
         for u in users
     ]
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -108,7 +124,6 @@ def admin_user(user_id: int):
         [InlineKeyboardButton(text="➖ Уменьшить лимит", callback_data=f"admin:limitdown:{user_id}")],
         [InlineKeyboardButton(text="📱 QR-коды", callback_data=f"admin:configs:{user_id}")],
         [InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"admin:block:{user_id}")],
-        [InlineKeyboardButton(text="⬅️ Пользователи", callback_data="admin:users")],
     ])
 
 
@@ -120,5 +135,4 @@ def admin_configs(configs):
         )]
         for row in configs
     ]
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:users")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
