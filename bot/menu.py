@@ -149,6 +149,7 @@ async def _create_config(message: Message, app):
                 f"✅ WireGuard #{config_id} создан.\n"
                 f"Адрес: {config_row['vpn_address']}"
             ),
+            reply_markup=menu,
         )
 
         conf_path = app.settings.qr_dir / f"{config_id}.conf"
