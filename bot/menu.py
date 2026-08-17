@@ -9,10 +9,14 @@ from bot import keyboards as kb
 
 logger = logging.getLogger(__name__)
 
-# IDs of the bot messages that represent the current menu screen.
-# QR codes and .conf files are intentionally not stored here, so they remain
-# in the chat when the user switches to another menu item.
+# Сообщения текущего экрана меню. Они удаляются при выборе другого пункта.
+# QR-коды и .conf сюда не попадают и поэтому остаются в чате.
 _menu_message_ids: dict[int, set[int]] = {}
+
+# Отдельно храним сообщение-якорь, которое несёт ReplyKeyboard.
+# Его НЕЛЬЗЯ удалять при обычной навигации: иначе Telegram-клиент может
+# убрать постоянную клавиатуру.
+_keyboard_anchor_ids: dict[int, int] = {}
 
 
 def _reply_menu_for_user(user_id: int, app):
@@ -41,7 +45,7 @@ async def _delete_user_message(message: Message):
 
 
 async def _clear_menu_messages(bot, chat_id: int):
-    """Delete the previous bot-generated menu screen for this chat."""
+    """Удалить только сменяемый экран меню, не трогая ReplyKeyboard-якорь."""
     message_ids = _menu_message_ids.pop(chat_id, set())
     for message_id in message_ids:
         try:
@@ -51,16 +55,13 @@ async def _clear_menu_messages(bot, chat_id: int):
 
 
 async def _prepare_menu_screen(message: Message, app):
-    """Remove the previous menu screen and the ReplyKeyboard button message."""
+    """Удалить предыдущий экран меню и сообщение нажатой ReplyKeyboard-кнопки."""
     await _clear_menu_messages(message.bot, message.chat.id)
     await _delete_user_message(message)
 
 
-async def _send_menu_message(message: Message, app, text: str, reply_markup=None):
-    """Send a new menu screen and remember it for the next navigation action."""
-    if reply_markup is None:
-        reply_markup = _reply_menu(message, app)
-
+async def _send_screen(message: Message, text: str, reply_markup=None):
+    """Отправить сменяемый экран меню и запомнить его ID."""
     sent = await message.bot.send_message(
         message.chat.id,
         text,
@@ -70,24 +71,37 @@ async def _send_menu_message(message: Message, app, text: str, reply_markup=None
     return sent
 
 
-async def _send_inline_menu(message: Message, text: str, reply_markup):
-    """Send a menu screen with inline navigation and remember it."""
+async def _replace_keyboard_anchor(message: Message, app, text: str):
+    """Создать новое постоянное ReplyKeyboard-сообщение и удалить старый якорь."""
+    chat_id = message.chat.id
+    old_id = _keyboard_anchor_ids.get(chat_id)
+
+    # Сначала отправляем новый якорь. Так ReplyKeyboard уже установлена,
+    # прежде чем будет удалено старое сообщение.
     sent = await message.bot.send_message(
-        message.chat.id,
+        chat_id,
         text,
-        reply_markup=reply_markup,
+        reply_markup=_reply_menu(message, app),
     )
-    _menu_message_ids.setdefault(message.chat.id, set()).add(sent.message_id)
+    _keyboard_anchor_ids[chat_id] = sent.message_id
+
+    if old_id and old_id != sent.message_id:
+        try:
+            await message.bot.delete_message(chat_id, old_id)
+        except Exception:
+            pass
+
     return sent
 
 
 async def _send_home(message: Message, app):
-    await _prepare_menu_screen(message, app)
+    await _clear_menu_messages(message.bot, message.chat.id)
+    await _delete_user_message(message)
 
     row = app.db.get_user(message.from_user.id)
 
     if _is_admin(message, app):
-        await _send_menu_message(
+        await _replace_keyboard_anchor(
             message,
             app,
             "👋 Добро пожаловать в BGVmann!\n\n"
@@ -96,7 +110,7 @@ async def _send_home(message: Message, app):
         return
 
     if _approved(row):
-        await _send_menu_message(
+        await _replace_keyboard_anchor(
             message,
             app,
             "👋 Добро пожаловать в WireGuard-бот!\n\n"
@@ -105,22 +119,20 @@ async def _send_home(message: Message, app):
         return
 
     if row and row["status"] == "blocked":
-        await _send_menu_message(
+        await _send_screen(
             message,
-            app,
             "🚫 Доступ заблокирован.",
         )
         return
 
     if row and row["status"] == "pending":
-        await _send_menu_message(
+        await _send_screen(
             message,
-            app,
             "⏳ Ваша заявка уже ожидает решения администратора.",
         )
         return
 
-    await _send_inline_menu(
+    await _send_screen(
         message,
         "👋 Добро пожаловать!\n\n"
         "Для получения WireGuard-доступа необходимо зарегистрироваться.",
@@ -133,23 +145,21 @@ async def _show_configs(message: Message, app):
 
     row = app.db.get_user(message.from_user.id)
     if not _approved(row):
-        await _send_menu_message(
+        await _send_screen(
             message,
-            app,
             "❌ Доступ к WireGuard пока не разрешён.",
         )
         return
 
     configs = app.db.active_configs(row["id"])
     if not configs:
-        await _send_menu_message(
+        await _send_screen(
             message,
-            app,
             "📱 У вас пока нет активных WireGuard-конфигураций.",
         )
         return
 
-    await _send_inline_menu(
+    await _send_screen(
         message,
         "📱 Ваши WireGuard-конфигурации:\n\n"
         "Выберите QR-код или конфигурацию:",
@@ -161,26 +171,21 @@ async def _create_config(message: Message, app):
     await _prepare_menu_screen(message, app)
 
     row = app.db.get_user(message.from_user.id)
-    menu = _reply_menu(message, app)
 
     if not _approved(row):
-        await _send_menu_message(
+        await _send_screen(
             message,
-            app,
             "❌ Доступ к WireGuard пока не разрешён.",
-            menu,
         )
         return
 
     active = app.db.count_active_configs(row["id"])
     if active >= row["qr_limit"]:
-        await _send_menu_message(
+        await _send_screen(
             message,
-            app,
             f"⚠️ Лимит достигнут: {active}/{row['qr_limit']}.\n\n"
             "Чтобы получить новый QR-код, администратор должен увеличить ваш лимит "
             "или удалить одну из существующих конфигураций.",
-            menu,
         )
         return
 
@@ -191,8 +196,7 @@ async def _create_config(message: Message, app):
         )
         config_row = app.db.get_config(config_id)
 
-        # These are delivery messages, not menu screens. They intentionally
-        # remain in the chat after the next ReplyKeyboard navigation action.
+        # QR и .conf — доставка, а не экран меню. Они остаются в истории.
         await message.bot.send_photo(
             message.chat.id,
             FSInputFile(qr_path),
@@ -200,7 +204,6 @@ async def _create_config(message: Message, app):
                 f"✅ WireGuard #{config_id} создан.\n"
                 f"Адрес: {config_row['vpn_address']}"
             ),
-            reply_markup=menu,
         )
 
         conf_path = app.settings.qr_dir / f"{config_id}.conf"
@@ -211,16 +214,13 @@ async def _create_config(message: Message, app):
             message.chat.id,
             FSInputFile(conf_path),
             caption=f"📄 Конфигурация WireGuard #{config_id}",
-            reply_markup=menu,
         )
 
     except Exception as exc:
         logger.exception("WireGuard creation failed")
-        await _send_menu_message(
+        await _send_screen(
             message,
-            app,
             f"❌ Не удалось создать конфигурацию: {exc}",
-            menu,
         )
 
 
@@ -239,7 +239,7 @@ async def _show_help(message: Message, app):
             "Для получения WireGuard-доступа сначала отправьте заявку на регистрацию."
         )
 
-    await _send_menu_message(message, app, text)
+    await _send_screen(message, text)
 
 
 async def _show_admin_users(message: Message, app):
@@ -247,14 +247,13 @@ async def _show_admin_users(message: Message, app):
 
     users = app.db.approved_users()
     if not users:
-        await _send_menu_message(
+        await _send_screen(
             message,
-            app,
             "👥 Разрешённых пользователей нет.",
         )
         return
 
-    await _send_inline_menu(
+    await _send_screen(
         message,
         "👥 Пользователи:\n\n"
         "Выберите пользователя для просмотра подробной информации.",
@@ -267,23 +266,21 @@ async def _show_admin_pending(message: Message, app):
 
     users = app.db.pending_users()
     if not users:
-        await _send_menu_message(
+        await _send_screen(
             message,
-            app,
             "🔔 Новых запросов нет.",
         )
         return
 
     for user in users:
-        await _send_inline_menu(
+        await _send_screen(
             message,
             _user_text(user),
             kb.admin_request(user["id"]),
         )
 
-    await _send_menu_message(
+    await _send_screen(
         message,
-        app,
         "🔔 Заявки на регистрацию показаны выше.",
     )
 
@@ -297,12 +294,7 @@ def register_menu_handlers(router: Router, app):
     async def menu_admin(message: Message):
         if not _is_admin(message, app):
             await _delete_user_message(message)
-            await _send_menu_message(
-                message,
-                app,
-                "Нет доступа.",
-                kb.user_reply_menu(),
-            )
+            await _send_screen(message, "Нет доступа.")
             return
         await _send_home(message, app)
 
@@ -359,12 +351,13 @@ def register_menu_handlers(router: Router, app):
         except Exception:
             pass
 
-        await app.bot.send_message(
+        sent = await app.bot.send_message(
             user["telegram_id"],
             "✅ Ваша регистрация подтверждена.\n\n"
             "Теперь вы можете получать WireGuard-конфигурации.",
             reply_markup=_reply_menu_for_user(user["telegram_id"], app),
         )
+        _keyboard_anchor_ids[user["telegram_id"]] = sent.message_id
         await call.answer("Пользователь разрешён.")
 
     @router.callback_query(F.data.startswith("admin:reject:"))
@@ -393,7 +386,6 @@ def register_menu_handlers(router: Router, app):
         await app.bot.send_message(
             user["telegram_id"],
             "❌ Ваша заявка на регистрацию отклонена.",
-            reply_markup=kb.user_reply_menu(),
         )
         await call.answer("Отклонено.")
 
@@ -417,7 +409,6 @@ def register_menu_handlers(router: Router, app):
         await call.message.answer_photo(
             FSInputFile(qr_path),
             caption=f"📷 WireGuard #{config_id}",
-            reply_markup=_reply_menu_for_user(call.from_user.id, app),
         )
         await call.answer()
 
@@ -440,7 +431,6 @@ def register_menu_handlers(router: Router, app):
         await call.message.answer_document(
             FSInputFile(path),
             caption=f"📄 WireGuard #{config_id}",
-            reply_markup=_reply_menu_for_user(call.from_user.id, app),
         )
         await call.answer()
 
