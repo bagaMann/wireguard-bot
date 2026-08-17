@@ -26,9 +26,15 @@ class App:
             self.routeros,
         )
 
+        # Новый постоянный интерфейс регистрируем отдельным роутером
+        # перед legacy-обработчиками, чтобы он перехватывал /start,
+        # /admin и все ReplyKeyboard-кнопки.
+        menu_router = Router()
+        register_menu_handlers(menu_router, self)
+        self.dispatcher.include_router(menu_router)
+
         router = Router()
         register_handlers(router, self)
-        register_menu_handlers(router, self)
         self.dispatcher.include_router(router)
 
     async def run(self):
