@@ -77,7 +77,6 @@ def admin_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📨 Запросы", callback_data="admin:pending")],
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="admin:users")],
-        [InlineKeyboardButton(text="📱 WireGuard", callback_data="admin:wg")],
     ])
 
 
