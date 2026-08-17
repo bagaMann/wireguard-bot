@@ -1,0 +1,22 @@
+[Unit]
+Description=WireGuard Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wireguard-bot
+Group=wireguard-bot
+WorkingDirectory=/opt/wireguard-bot
+ExecStart=/opt/wireguard-bot/.venv/bin/python -m bot
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/wireguard-bot/data
+
+[Install]
+WantedBy=multi-user.target

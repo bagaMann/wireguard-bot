@@ -1,0 +1,44 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data
+data/*.db
+data/*.db-*
+data/qr/*
+!data/qr/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+.venv/
+venv/
+env/
+
+# Logs / runtime
+*.log
+*.pid
+
+# IDE
+.idea/
+.vscode/
+
+# Backups / temporary files
+*.backup
+*.bak
+*.tmp
+bot.backup-*/
+wireguard-bot-fixed/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
