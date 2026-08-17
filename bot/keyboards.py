@@ -10,7 +10,11 @@ def user_reply_menu():
     """Постоянное меню обычного пользователя."""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📱 WireGuard")],
+            [
+                KeyboardButton(text="📱 Мои QR-коды"),
+                KeyboardButton(text="➕ Получить новый QR"),
+            ],
+            [KeyboardButton(text="ℹ️ Помощь")],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -18,12 +22,17 @@ def user_reply_menu():
 
 
 def admin_reply_menu():
-    """Постоянное меню администратора: пользовательский и админский режим."""
+    """Постоянное меню администратора: пользовательские и админские действия."""
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="👤 Пользователь"),
-                KeyboardButton(text="🔐 Администрирование"),
+                KeyboardButton(text="📱 Мои QR-коды"),
+                KeyboardButton(text="➕ Получить новый QR"),
+            ],
+            [KeyboardButton(text="ℹ️ Помощь")],
+            [
+                KeyboardButton(text="👥 Пользователи"),
+                KeyboardButton(text="🔔 Запросы"),
             ],
         ],
         resize_keyboard=True,
