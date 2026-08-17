@@ -10,10 +10,14 @@ from bot import keyboards as kb
 logger = logging.getLogger(__name__)
 
 
-def _reply_menu(message: Message, app):
-    if message.from_user.id in app.settings.admin_ids:
+def _reply_menu_for_user(user_id: int, app):
+    if user_id in app.settings.admin_ids:
         return kb.admin_reply_menu()
     return kb.user_reply_menu()
+
+
+def _reply_menu(message: Message, app):
+    return _reply_menu_for_user(message.from_user.id, app)
 
 
 def _is_admin(message: Message, app):
@@ -260,6 +264,71 @@ def register_menu_handlers(router: Router, app):
             return
         await _show_admin_pending(message, app)
 
+    @router.callback_query(F.data.startswith("admin:approve:"))
+    async def menu_admin_approve(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        user = app.db.get_user_by_id(user_id)
+        if not user:
+            await call.answer("Пользователь не найден.", show_alert=True)
+            return
+
+        if user["status"] == "approved":
+            await call.answer("Пользователь уже разрешён.", show_alert=True)
+            return
+
+        app.db.approve_user(
+            user_id,
+            call.from_user.id,
+            app.settings.default_qr_limit,
+        )
+        user = app.db.get_user_by_id(user_id)
+
+        try:
+            await call.message.edit_text(_user_text(user) + "\n\n✅ Разрешён.")
+        except Exception:
+            pass
+
+        await app.bot.send_message(
+            user["telegram_id"],
+            "✅ Ваша регистрация подтверждена.\n\n"
+            "Теперь вы можете получать WireGuard-конфигурации.",
+            reply_markup=_reply_menu_for_user(user["telegram_id"], app),
+        )
+        await call.answer("Пользователь разрешён.")
+
+    @router.callback_query(F.data.startswith("admin:reject:"))
+    async def menu_admin_reject(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        user = app.db.get_user_by_id(user_id)
+        if not user:
+            await call.answer("Пользователь не найден.", show_alert=True)
+            return
+
+        if user["status"] != "pending":
+            await call.answer("Заявка уже обработана.", show_alert=True)
+            return
+
+        app.db.reject_user(user_id, call.from_user.id)
+        user = app.db.get_user_by_id(user_id)
+
+        try:
+            await call.message.edit_text(_user_text(user) + "\n\n❌ Отклонён.")
+        except Exception:
+            pass
+
+        await app.bot.send_message(
+            user["telegram_id"],
+            "❌ Ваша заявка на регистрацию отклонена.",
+            reply_markup=kb.user_reply_menu(),
+        )
+        await call.answer("Отклонено.")
+
     @router.callback_query(F.data.startswith("menu:qr:"))
     async def menu_qr(call: CallbackQuery):
         config_id = int(call.data.split(":")[2])
@@ -278,7 +347,7 @@ def register_menu_handlers(router: Router, app):
         await call.message.answer_photo(
             FSInputFile(qr_path),
             caption=f"📷 WireGuard #{config_id}",
-            reply_markup=_reply_menu(call.message, app),
+            reply_markup=_reply_menu_for_user(call.from_user.id, app),
         )
         await call.answer()
 
@@ -299,7 +368,7 @@ def register_menu_handlers(router: Router, app):
         await call.message.answer_document(
             FSInputFile(path),
             caption=f"📄 WireGuard #{config_id}",
-            reply_markup=_reply_menu(call.message, app),
+            reply_markup=_reply_menu_for_user(call.from_user.id, app),
         )
         await call.answer()
 
