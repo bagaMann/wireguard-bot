@@ -3,7 +3,7 @@ import logging
 
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, FSInputFile, Message
+from aiogram.types import CallbackQuery, FSInputFile, Message, ReplyKeyboardRemove
 
 from bot import keyboards as kb
 
@@ -640,6 +640,7 @@ def register_menu_handlers(router: Router, app):
                 telegram_id,
                 "🗑 Ваша учётная запись WireGuard удалена администратором.\n\n"
                 "При необходимости вы можете снова вызвать меню и отправить новую заявку на регистрацию.",
+                reply_markup=ReplyKeyboardRemove(),
             )
         except Exception:
             logger.exception("Failed to notify deleted user %s", telegram_id)
