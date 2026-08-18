@@ -11,7 +11,7 @@ def user_reply_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="📱 Мои QR-коды"),
+                KeyboardButton(text="📱 Мои QR"),
                 KeyboardButton(text="➕ Новый QR"),
             ],
             [KeyboardButton(text="ℹ️ Помощь")],
@@ -28,7 +28,7 @@ def admin_reply_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text="📱 Мои QR-коды"),
+                KeyboardButton(text="📱 Мои QR"),
                 KeyboardButton(text="➕ Новый QR"),
             ],
             [KeyboardButton(text="ℹ️ Помощь")],
@@ -46,7 +46,7 @@ def admin_reply_menu():
 
 def user_main():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Мои QR-коды", callback_data="user:configs")],
+        [InlineKeyboardButton(text="📱 Мои QR", callback_data="user:configs")],
         [InlineKeyboardButton(text="➕ Новый QR", callback_data="user:new")],
     ])
 
@@ -133,8 +133,10 @@ def admin_user(user_id: int, status: str = "approved"):
         )
 
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Увеличить лимит", callback_data=f"admin:limitup:{user_id}")],
-        [InlineKeyboardButton(text="➖ Уменьшить лимит", callback_data=f"admin:limitdown:{user_id}")],
+        [
+            InlineKeyboardButton(text="➖ Уменьшить", callback_data=f"admin:limitdown:{user_id}"),
+            InlineKeyboardButton(text="➕ Увеличить", callback_data=f"admin:limitup:{user_id}"),
+        ],
         [InlineKeyboardButton(text="📱 QR-коды", callback_data=f"admin:configs:{user_id}")],
         [access_button],
         [InlineKeyboardButton(text="🗑 Удалить пользователя", callback_data=f"admin:delete:{user_id}")],
