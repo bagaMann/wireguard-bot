@@ -54,6 +54,17 @@ class RouterOSClient:
         finally:
             api.close()
 
+    def _set_peer_disabled_sync(self, peer_id, disabled: bool):
+        api = self._connect()
+        try:
+            path = api.path("/interface/wireguard/peers")
+            path.update(**{
+                ".id": peer_id,
+                "disabled": disabled,
+            })
+        finally:
+            api.close()
+
     def _test_sync(self):
         api = self._connect()
         try:
@@ -72,6 +83,19 @@ class RouterOSClient:
 
     async def remove_peer(self, peer_id):
         await asyncio.to_thread(self._remove_peer_sync, peer_id)
+
+    async def set_peer_disabled(self, peer_id, disabled: bool):
+        await asyncio.to_thread(
+            self._set_peer_disabled_sync,
+            peer_id,
+            disabled,
+        )
+
+    async def disable_peer(self, peer_id):
+        await self.set_peer_disabled(peer_id, True)
+
+    async def enable_peer(self, peer_id):
+        await self.set_peer_disabled(peer_id, False)
 
     async def test(self):
         await asyncio.to_thread(self._test_sync)
