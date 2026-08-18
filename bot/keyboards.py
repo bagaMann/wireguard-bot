@@ -120,12 +120,39 @@ def admin_users(users):
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_user(user_id: int):
+def admin_user(user_id: int, status: str = "approved"):
+    if status == "blocked":
+        access_button = InlineKeyboardButton(
+            text="✅ Разблокировать",
+            callback_data=f"admin:unblock:{user_id}",
+        )
+    else:
+        access_button = InlineKeyboardButton(
+            text="🚫 Заблокировать",
+            callback_data=f"admin:block:{user_id}",
+        )
+
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Увеличить лимит", callback_data=f"admin:limitup:{user_id}")],
         [InlineKeyboardButton(text="➖ Уменьшить лимит", callback_data=f"admin:limitdown:{user_id}")],
         [InlineKeyboardButton(text="📱 QR-коды", callback_data=f"admin:configs:{user_id}")],
-        [InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"admin:block:{user_id}")],
+        [access_button],
+        [InlineKeyboardButton(text="🗑 Удалить пользователя", callback_data=f"admin:delete:{user_id}")],
+    ])
+
+
+def admin_delete_confirm(user_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="✅ Да, удалить",
+                callback_data=f"admin:deleteconfirm:{user_id}",
+            ),
+            InlineKeyboardButton(
+                text="❌ Отмена",
+                callback_data=f"admin:deletecancel:{user_id}",
+            ),
+        ],
     ])
 
 
