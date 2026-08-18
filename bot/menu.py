@@ -37,6 +37,45 @@ def _approved(row):
     return row and row["status"] == "approved"
 
 
+def _admin_users(app):
+    """Показать разрешённых и заблокированных пользователей одним списком."""
+    with app.db.connect() as db:
+        return db.execute(
+            """
+            SELECT *
+            FROM users
+            WHERE status IN ('approved', 'blocked')
+            ORDER BY created_at
+            """
+        ).fetchall()
+
+
+def _all_user_configs(app, user_id: int):
+    with app.db.connect() as db:
+        return db.execute(
+            """
+            SELECT *
+            FROM wireguard_configs
+            WHERE user_id=?
+            ORDER BY id
+            """,
+            (user_id,),
+        ).fetchall()
+
+
+def _delete_user_rows(app, user_id: int):
+    """Физически удалить конфигурации пользователя и затем самого пользователя."""
+    with app.db.connect() as db:
+        db.execute(
+            "DELETE FROM wireguard_configs WHERE user_id=?",
+            (user_id,),
+        )
+        db.execute(
+            "DELETE FROM users WHERE id=?",
+            (user_id,),
+        )
+
+
 async def _delete_user_message(message: Message):
     try:
         await message.delete()
@@ -245,17 +284,18 @@ async def _show_help(message: Message, app):
 async def _show_admin_users(message: Message, app):
     await _prepare_menu_screen(message, app)
 
-    users = app.db.approved_users()
+    users = _admin_users(app)
     if not users:
         await _send_screen(
             message,
-            "👥 Разрешённых пользователей нет.",
+            "👥 Пользователей нет.",
         )
         return
 
     await _send_screen(
         message,
         "👥 Пользователи:\n\n"
+        "🟢 разрешён   🔴 заблокирован\n\n"
         "Выберите пользователя для просмотра подробной информации.",
         kb.admin_users(users),
     )
@@ -283,6 +323,32 @@ async def _show_admin_pending(message: Message, app):
         message,
         "🔔 Заявки на регистрацию показаны выше.",
     )
+
+
+async def _edit_user_card(call: CallbackQuery, app, user_id: int):
+    user = app.db.get_user_by_id(user_id)
+    if not user:
+        await call.answer("Пользователь не найден.", show_alert=True)
+        return False
+
+    await call.message.edit_text(
+        _user_text(user),
+        reply_markup=kb.admin_user(user_id, user["status"]),
+    )
+    return True
+
+
+async def _delete_active_config(app, config, admin_id: int):
+    """Удалить peer, пометить конфигурацию удалённой и убрать локальные файлы."""
+    if config["status"] != "active":
+        return
+
+    if config["routeros_peer_id"]:
+        await app.routeros.remove_peer(config["routeros_peer_id"])
+
+    app.db.mark_config_deleted(config["id"], admin_id)
+    (app.settings.qr_dir / f"{config['id']}.png").unlink(missing_ok=True)
+    (app.settings.qr_dir / f"{config['id']}.conf").unlink(missing_ok=True)
 
 
 def register_menu_handlers(router: Router, app):
@@ -389,6 +455,268 @@ def register_menu_handlers(router: Router, app):
         )
         await call.answer("Отклонено.")
 
+    @router.callback_query(F.data.startswith("admin:user:"))
+    async def menu_admin_user(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        if await _edit_user_card(call, app, user_id):
+            await call.answer()
+
+    @router.callback_query(F.data.startswith("admin:limitup:"))
+    async def menu_admin_limit_up(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        user = app.db.get_user_by_id(user_id)
+        if not user:
+            await call.answer("Пользователь не найден.", show_alert=True)
+            return
+
+        app.db.set_qr_limit(user_id, user["qr_limit"] + 1)
+        await _edit_user_card(call, app, user_id)
+        await call.answer("Лимит увеличен.")
+
+    @router.callback_query(F.data.startswith("admin:limitdown:"))
+    async def menu_admin_limit_down(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        user = app.db.get_user_by_id(user_id)
+        if not user:
+            await call.answer("Пользователь не найден.", show_alert=True)
+            return
+
+        active = app.db.count_active_configs(user_id)
+        new_limit = max(active, user["qr_limit"] - 1)
+        app.db.set_qr_limit(user_id, new_limit)
+        await _edit_user_card(call, app, user_id)
+        await call.answer("Лимит уменьшен.")
+
+    @router.callback_query(F.data.startswith("admin:block:"))
+    async def menu_admin_block(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        user = app.db.get_user_by_id(user_id)
+        if not user:
+            await call.answer("Пользователь не найден.", show_alert=True)
+            return
+
+        if user["telegram_id"] in app.settings.admin_ids:
+            await call.answer("Администратора нельзя заблокировать.", show_alert=True)
+            return
+
+        app.db.set_status(user_id, "blocked")
+        await _edit_user_card(call, app, user_id)
+
+        try:
+            await app.bot.send_message(
+                user["telegram_id"],
+                "🚫 Ваш доступ к WireGuard-боту заблокирован администратором.",
+            )
+        except Exception:
+            logger.exception("Failed to notify blocked user %s", user["telegram_id"])
+
+        await call.answer("Пользователь заблокирован.")
+
+    @router.callback_query(F.data.startswith("admin:unblock:"))
+    async def menu_admin_unblock(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        user = app.db.get_user_by_id(user_id)
+        if not user:
+            await call.answer("Пользователь не найден.", show_alert=True)
+            return
+
+        app.db.set_status(user_id, "approved")
+        user = app.db.get_user_by_id(user_id)
+        await _edit_user_card(call, app, user_id)
+
+        try:
+            sent = await app.bot.send_message(
+                user["telegram_id"],
+                "✅ Ваш доступ к WireGuard-боту восстановлен.",
+                reply_markup=_reply_menu_for_user(user["telegram_id"], app),
+            )
+            _keyboard_anchor_ids[user["telegram_id"]] = sent.message_id
+        except Exception:
+            logger.exception("Failed to notify unblocked user %s", user["telegram_id"])
+
+        await call.answer("Пользователь разблокирован.")
+
+    @router.callback_query(F.data.startswith("admin:delete:"))
+    async def menu_admin_delete(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        user = app.db.get_user_by_id(user_id)
+        if not user:
+            await call.answer("Пользователь не найден.", show_alert=True)
+            return
+
+        if user["telegram_id"] in app.settings.admin_ids:
+            await call.answer("Администратора нельзя удалить.", show_alert=True)
+            return
+
+        identity = _user_identity_row(user)
+        active = app.db.count_active_configs(user_id)
+        await call.message.edit_text(
+            "⚠️ Удаление пользователя\n\n"
+            f"{identity}\n\n"
+            f"Активных WireGuard-конфигураций: {active}\n\n"
+            "Будут удалены все активные peers в RouterOS, локальные QR/.conf, "
+            "все записи конфигураций и сам пользователь.\n\n"
+            "После этого пользователь сможет зарегистрироваться заново.",
+            reply_markup=kb.admin_delete_confirm(user_id),
+        )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("admin:deletecancel:"))
+    async def menu_admin_delete_cancel(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        if await _edit_user_card(call, app, user_id):
+            await call.answer("Удаление отменено.")
+
+    @router.callback_query(F.data.startswith("admin:deleteconfirm:"))
+    async def menu_admin_delete_confirm(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        user = app.db.get_user_by_id(user_id)
+        if not user:
+            await call.answer("Пользователь уже удалён.", show_alert=True)
+            return
+
+        if user["telegram_id"] in app.settings.admin_ids:
+            await call.answer("Администратора нельзя удалить.", show_alert=True)
+            return
+
+        # Удаляем активные конфигурации по одной. Если RouterOS вернёт ошибку,
+        # пользователь остаётся в базе, а уже успешно удалённые конфигурации
+        # будут помечены deleted. Повторное удаление продолжит с оставшихся.
+        try:
+            configs = _all_user_configs(app, user_id)
+            for config in configs:
+                await _delete_active_config(app, config, call.from_user.id)
+        except Exception as exc:
+            logger.exception("Failed to remove WireGuard peers while deleting user %s", user_id)
+            await call.answer(
+                f"Не удалось удалить все WireGuard peers: {exc}",
+                show_alert=True,
+            )
+            return
+
+        # На всякий случай удаляем файлы и для старых deleted-конфигураций.
+        configs = _all_user_configs(app, user_id)
+        for config in configs:
+            (app.settings.qr_dir / f"{config['id']}.png").unlink(missing_ok=True)
+            (app.settings.qr_dir / f"{config['id']}.conf").unlink(missing_ok=True)
+
+        telegram_id = user["telegram_id"]
+        _delete_user_rows(app, user_id)
+        _keyboard_anchor_ids.pop(telegram_id, None)
+        _menu_message_ids.pop(telegram_id, None)
+
+        await call.message.edit_text(
+            "🗑 Пользователь удалён.\n\n"
+            "Все его WireGuard-конфигурации и записи удалены. "
+            "Теперь он может зарегистрироваться заново."
+        )
+
+        try:
+            await app.bot.send_message(
+                telegram_id,
+                "🗑 Ваша учётная запись WireGuard удалена администратором.\n\n"
+                "При необходимости вы можете снова вызвать меню и отправить новую заявку на регистрацию.",
+            )
+        except Exception:
+            logger.exception("Failed to notify deleted user %s", telegram_id)
+
+        await call.answer("Пользователь удалён.")
+
+    @router.callback_query(F.data.startswith("admin:configs:"))
+    async def menu_admin_configs(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        user_id = int(call.data.split(":")[2])
+        user = app.db.get_user_by_id(user_id)
+        if not user:
+            await call.answer("Пользователь не найден.", show_alert=True)
+            return
+
+        configs = app.db.active_configs(user_id)
+        if not configs:
+            await call.message.edit_text(
+                "Активных конфигураций нет.",
+                reply_markup=kb.admin_user(user_id, user["status"]),
+            )
+        else:
+            await call.message.edit_text(
+                "📱 Активные WireGuard-конфигурации:\n\n"
+                "Нажмите на конфигурацию, чтобы удалить её.",
+                reply_markup=kb.admin_configs(configs),
+            )
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("admin:delcfg:"))
+    async def menu_admin_delete_config(call: CallbackQuery):
+        if call.from_user.id not in app.settings.admin_ids:
+            return
+
+        config_id = int(call.data.split(":")[2])
+        config = app.db.get_config(config_id)
+        if not config or config["status"] != "active":
+            await call.answer("Конфигурация уже удалена.", show_alert=True)
+            return
+
+        user_id = config["user_id"]
+        user = app.db.get_user_by_id(user_id)
+
+        try:
+            await _delete_active_config(app, config, call.from_user.id)
+        except Exception as exc:
+            logger.exception("Delete config failed")
+            await call.answer(f"Ошибка: {exc}", show_alert=True)
+            return
+
+        configs = app.db.active_configs(user_id)
+        if configs:
+            await call.message.edit_text(
+                f"🗑 WireGuard #{config_id} удалён.\n\nОставшиеся конфигурации:",
+                reply_markup=kb.admin_configs(configs),
+            )
+        else:
+            status = user["status"] if user else "approved"
+            await call.message.edit_text(
+                f"🗑 WireGuard #{config_id} удалён.\n\nАктивных QR-кодов больше нет.",
+                reply_markup=kb.admin_user(user_id, status),
+            )
+
+        if user:
+            try:
+                await app.bot.send_message(
+                    user["telegram_id"],
+                    f"🗑 WireGuard #{config_id} был удалён администратором.\n\n"
+                    "Одно место в вашем лимите снова доступно.",
+                )
+            except Exception:
+                logger.exception("Failed to notify user about deleted config")
+
+        await call.answer("Удалено.")
+
     @router.callback_query(F.data.startswith("menu:qr:"))
     async def menu_qr(call: CallbackQuery):
         config_id = int(call.data.split(":")[2])
@@ -445,6 +773,14 @@ def _owns_config(user, config):
     )
 
 
+def _user_identity_row(user):
+    first_name = (user["first_name"] or "").strip()
+    last_name = (user["last_name"] or "").strip()
+    full_name = " ".join(x for x in (first_name, last_name) if x)
+    username = f"@{user['username']}" if user["username"] else "нет"
+    return f"{full_name or 'Без имени'} ({username}) — ID {user['telegram_id']}"
+
+
 def _user_text(user):
     first_name = (user["first_name"] or "").strip()
     last_name = (user["last_name"] or "").strip()
@@ -454,7 +790,7 @@ def _user_text(user):
         "approved": "🟢 Разрешён",
         "pending": "🟡 Ожидает решения",
         "rejected": "🔴 Отклонён",
-        "blocked": "🚫 Заблокирован",
+        "blocked": "🔴 Заблокирован",
     }.get(user["status"], user["status"])
     return (
         "👤 Пользователь\n\n"
