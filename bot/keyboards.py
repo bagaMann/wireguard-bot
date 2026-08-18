@@ -12,7 +12,7 @@ def user_reply_menu():
         keyboard=[
             [
                 KeyboardButton(text="📱 Мои QR-коды"),
-                KeyboardButton(text="➕ Получить новый QR"),
+                KeyboardButton(text="➕ Новый QR"),
             ],
             [KeyboardButton(text="ℹ️ Помощь")],
         ],
@@ -29,7 +29,7 @@ def admin_reply_menu():
         keyboard=[
             [
                 KeyboardButton(text="📱 Мои QR-коды"),
-                KeyboardButton(text="➕ Получить новый QR"),
+                KeyboardButton(text="➕ Новый QR"),
             ],
             [KeyboardButton(text="ℹ️ Помощь")],
             [
@@ -47,7 +47,7 @@ def admin_reply_menu():
 def user_main():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📱 Мои QR-коды", callback_data="user:configs")],
-        [InlineKeyboardButton(text="➕ Получить новый QR", callback_data="user:new")],
+        [InlineKeyboardButton(text="➕ Новый QR", callback_data="user:new")],
     ])
 
 
