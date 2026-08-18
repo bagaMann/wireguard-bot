@@ -4,6 +4,7 @@ from aiogram import Bot, Dispatcher, Router
 from aiogram.types import BotCommand, MenuButtonCommands
 
 from bot.config import load_settings
+from bot.cosmetic import register_cosmetic_handlers
 from bot.database import Database
 from bot.handlers import register_handlers
 from bot.logging import setup_logging
@@ -35,6 +36,13 @@ class App:
         peer_access_router = Router()
         register_peer_access_handlers(peer_access_router, self)
         self.dispatcher.include_router(peer_access_router)
+
+        # Небольшие UI-исправления держим перед основным меню, чтобы
+        # короткая кнопка «Новый QR» и корректная помощь для blocked
+        # обрабатывались без изменения стабильной навигации.
+        cosmetic_router = Router()
+        register_cosmetic_handlers(cosmetic_router, self)
+        self.dispatcher.include_router(cosmetic_router)
 
         # Новый интерфейс регистрируем перед legacy-обработчиками.
         menu_router = Router()
