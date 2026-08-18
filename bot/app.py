@@ -8,6 +8,7 @@ from bot.database import Database
 from bot.handlers import register_handlers
 from bot.logging import setup_logging
 from bot.menu import register_menu_handlers
+from bot.registration import register_registration_handlers
 from bot.routeros import RouterOSClient
 from bot.wireguard import WireGuardService
 
@@ -33,6 +34,14 @@ class App:
         menu_router = Router()
         register_menu_handlers(menu_router, self)
         self.dispatcher.include_router(menu_router)
+
+        # Регистрацию держим отдельным роутером перед legacy handlers.
+        # Это исправляет первый запрос: новый пользователь после INSERT
+        # сразу имеет status='pending', поэтому старый обработчик ошибочно
+        # считал первую заявку повторной и не уведомлял администратора.
+        registration_router = Router()
+        register_registration_handlers(registration_router, self)
+        self.dispatcher.include_router(registration_router)
 
         router = Router()
         register_handlers(router, self)
