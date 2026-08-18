@@ -8,6 +8,7 @@ from bot.database import Database
 from bot.handlers import register_handlers
 from bot.logging import setup_logging
 from bot.menu import register_menu_handlers
+from bot.peer_access import register_peer_access_handlers
 from bot.registration import register_registration_handlers
 from bot.routeros import RouterOSClient
 from bot.wireguard import WireGuardService
@@ -28,9 +29,14 @@ class App:
             self.routeros,
         )
 
-        # Новый интерфейс регистрируем первым: legacy-обработчики
-        # остаются для административных операций, но не должны
-        # перехватывать /start и основные действия нового меню.
+        # Блокировку/разблокировку регистрируем раньше основного меню:
+        # эти обработчики синхронно меняют состояние WireGuard peers
+        # в RouterOS и только после успеха меняют статус пользователя в БД.
+        peer_access_router = Router()
+        register_peer_access_handlers(peer_access_router, self)
+        self.dispatcher.include_router(peer_access_router)
+
+        # Новый интерфейс регистрируем перед legacy-обработчиками.
         menu_router = Router()
         register_menu_handlers(menu_router, self)
         self.dispatcher.include_router(menu_router)
