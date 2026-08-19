@@ -61,6 +61,50 @@ class App:
         register_handlers(router, self)
         self.dispatcher.include_router(router)
 
+    async def ensure_admin_users(self):
+        """Создать/разрешить администраторов в новой пустой базе данных.
+
+        ADMIN_IDS даёт административное меню, но пользовательские QR-функции
+        используют запись из таблицы users. На чистой установке такой записи
+        ещё нет, поэтому администратор раньше видел «Доступ не разрешён».
+        """
+        log = logging.getLogger(__name__)
+
+        for telegram_id in self.settings.admin_ids:
+            username = None
+            first_name = "Administrator"
+            last_name = None
+
+            try:
+                chat = await self.bot.get_chat(telegram_id)
+                username = getattr(chat, "username", None)
+                first_name = getattr(chat, "first_name", None) or first_name
+                last_name = getattr(chat, "last_name", None)
+            except Exception as exc:
+                # Даже если Telegram временно не дал данные профиля,
+                # администратор всё равно должен быть создан в БД.
+                log.warning(
+                    "Could not read Telegram profile for admin %s: %s",
+                    telegram_id,
+                    exc,
+                )
+
+            user_id = self.db.upsert_pending_user(
+                telegram_id=telegram_id,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+            )
+            user = self.db.get_user_by_id(user_id)
+
+            if not user or user["status"] != "approved":
+                self.db.approve_user(
+                    user_id,
+                    telegram_id,
+                    self.settings.default_qr_limit,
+                )
+                log.info("Administrator %s provisioned in database", telegram_id)
+
     async def configure_telegram_menu(self):
         """Настраивает штатную кнопку Menu Telegram и единственную команду."""
         await self.bot.set_my_commands([
@@ -79,6 +123,7 @@ class App:
     async def run(self):
         logging.getLogger(__name__).info("Starting WireGuard Telegram Bot")
         await self.routeros.test()
+        await self.ensure_admin_users()
         await self.configure_telegram_menu()
         await self.bot.delete_webhook(drop_pending_updates=True)
         await self.dispatcher.start_polling(self.bot)
